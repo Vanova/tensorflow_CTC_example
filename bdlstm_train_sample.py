@@ -28,11 +28,12 @@ batchSize = 4
 ####Network Parameters
 nFeatures = 26 #12 MFCC coefficients + energy, and derivatives
 nHidden = 128
-nClasses = 28#27 characters, plus the "blank" for CTC
+nClasses = 28 #27 characters, plus the "blank" for CTC
 
 ####Load data
 print('Loading data')
 batchedData, maxTimeSteps, totalN = load_batched_data(INPUT_PATH, TARGET_PATH, batchSize)
+print("Max time step: %d" % maxTimeSteps)
 
 ####Define graph
 print('Defining graph')
@@ -47,7 +48,7 @@ with graph.as_default():
     #  Reshape to 2-D tensor (nTimeSteps*batchSize, nfeatures)
     inputXrs = tf.reshape(inputX, [-1, nFeatures])
     #  Split to get a list of 'n_steps' tensors of shape (batch_size, n_hidden)
-    inputList = tf.split(inputXrs, maxTimeSteps, 0)
+    inputList = tf.split(split_dim=0, num_split=maxTimeSteps, value=inputXrs)
     targetIxs = tf.placeholder(tf.int64)
     targetVals = tf.placeholder(tf.int32)
     targetShape = tf.placeholder(tf.int64)
@@ -66,10 +67,13 @@ with graph.as_default():
     biasesClasses = tf.Variable(tf.zeros([nClasses]))
 
     ####Network
-    forwardH1 = tf.contrib.rnn.LSTMCell(nHidden, use_peepholes=True, state_is_tuple=True)
-    backwardH1 = tf.contrib.rnn.LSTMCell(nHidden, use_peepholes=True, state_is_tuple=True)
-    fbH1, _, _ = tf.contrib.rnn.static_bidirectional_rnn(forwardH1, backwardH1, inputList, dtype=tf.float32,
-                                                         scope='BDLSTM_H1')
+    # tf.nn.rnn_cell.LSTMCell
+    forwardH1 = tf.nn.rnn_cell.LSTMCell(nHidden, use_peepholes=True, state_is_tuple=True)
+    backwardH1 = tf.nn.rnn_cell.LSTMCell(nHidden, use_peepholes=True, state_is_tuple=True)
+    fbH1, _, _ = tf.nn.bidirectional_rnn(forwardH1, backwardH1, inputList, dtype=tf.float32,
+                                         scope='BDLSTM_H1')
+    # fbH1, _, _ = tf.contrib.rnn.static_bidirectional_rnn(forwardH1, backwardH1, inputList, dtype=tf.float32,
+    #                                                      scope='BDLSTM_H1')
     fbH1rs = [tf.reshape(t, [batchSize, 2, nHidden]) for t in fbH1]
     outH1 = [tf.reduce_sum(tf.multiply(t, weightsOutH1), reduction_indices=1) + biasesOutH1 for t in fbH1rs]
 
@@ -77,7 +81,7 @@ with graph.as_default():
 
     ####Optimizing
     logits3d = tf.stack(logits)
-    loss = tf.reduce_mean(ctc.ctc_loss(targetY, logits3d, seqLengths))
+    loss = tf.reduce_mean(ctc.ctc_loss(inputs=logits3d, labels=targetY, sequence_length=seqLengths))
     optimizer = tf.train.MomentumOptimizer(learningRate, momentum).minimize(loss)
 
     ####Evaluating
